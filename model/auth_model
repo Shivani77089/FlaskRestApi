@@ -1,0 +1,95 @@
+
+
+import pyodbc
+import json
+from flask import make_response, request
+from datetime import datetime, timedelta
+import jwt
+import re
+
+import re
+import jwt
+from jwt.exceptions import ExpiredSignatureError, InvalidTokenError
+from flask import request, make_response
+from functools import wraps
+
+
+class auth_model:
+    def __init__(self):
+        try:
+            self.conn = pyodbc.connect(
+                'Driver={SQL Server};'
+                'Server=Shivani;'
+                'Database=ATMS;'
+                'Trusted_Connection=yes;'
+            )
+            self.cur = self.conn.cursor()
+            print("Connection established successfully")
+        except Exception as e:
+            print("Error occurred during connection:", e)
+
+    def token_auth(self, endpoint):
+        def decorator(func):
+            @wraps(func)
+            def wrapper(*args, **kwargs):
+                authorization = request.headers.get("Authorization")
+
+                if not authorization:
+                    return make_response({"error": "Missing Authorization header"}, 401)
+
+                token_match = re.match(r"Bearer\s+(.+)", authorization)
+                if not token_match:
+                    return make_response({"error": "Invalid token format"}, 401)
+
+                token = token_match.group(1)
+
+                try:
+                    jwt_decoded = jwt.decode(token, "shivani", algorithms=["HS256"])
+                except ExpiredSignatureError:
+                    return make_response({"error": "Token expired"}, 401)
+                except InvalidTokenError:
+                    return make_response({"error": "Invalid token"}, 401)
+
+                role_id = jwt_decoded.get("payload", {}).get("role_id")
+                if role_id is None:
+                    return make_response({"error": "Invalid payload in token"}, 400)
+
+                # Fetch roles allowed for this endpoint
+                self.cur.execute(
+                    "SELECT roles FROM accessibility_view WHERE endpoint = ?", (endpoint,)
+                )
+                result = self.cur.fetchone()
+                if not result:
+                    return make_response({"error": "Unknown endpoint"}, 404)
+
+                allowed_roles = result[0].split(",") if result[0] else []
+
+                if str(role_id) not in allowed_roles and "ALL" not in allowed_roles:
+                    return make_response({"error": "Unauthorized access"}, 403)
+
+                # All checks passed
+                return func(*args, **kwargs)
+
+            return wrapper
+
+        return decorator
+
+    # def token_auth(self, endpoint):
+    #     def inner1(func):
+    #         def inner2(*args):
+    #             authorization = request.headers.get("authorization")
+    #             if re.match("Bearer *([^ ]+) *$", authorization, flags=0):
+    #                 token = authorization.split(" ")[1]
+    #                 jwtdecoded = (jwt.decode(token, "shivani", algorithms="HS256"))
+    #                 role_id = jwtdecoded["payload"]["role_id"]
+    #                 self.cur.execute(f" select roles from accessibility_view where endpoint='{endpoint}'")
+    #                 result= self.cur.fetchall()
+    #                 if len(result)>0:
+    #                     print(result)
+    #                 else:
+    #                     return make_response({"ERROR": "UNKNOWN _ENDPOINT"},404)
+    #
+    #             return func(*args)
+    #         return inner2
+    #     return inner1
+
