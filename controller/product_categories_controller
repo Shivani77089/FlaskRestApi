@@ -1,0 +1,6 @@
+from app import app
+
+
+@app.route("/product/cat")
+def cat():
+    return "This is product categories operation"
