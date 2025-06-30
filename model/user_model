@@ -1,0 +1,135 @@
+import pyodbc
+import json
+from flask import make_response
+from datetime import datetime, timedelta
+import jwt
+
+class user_model:
+    def __init__(self):
+        try:
+            self.conn = pyodbc.connect(
+                'Driver={SQL Server};'
+                'Server=Shivani;'
+                'Database=ATMS;'
+                'Trusted_Connection=yes;'
+            )
+            self.cur = self.conn.cursor()
+            print("Connection established successfully")
+        except Exception as e:
+            print("Error occurred during connection:", e)
+
+    def user_getall_model(self):
+        try:
+            self.cur.execute("SELECT * FROM Users")
+            columns = [column[0] for column in self.cur.description]  # Get column names
+            rows = self.cur.fetchall()
+
+            # Convert each row (tuple) to a dictionary
+            result = [dict(zip(columns, row)) for row in rows]
+
+            return json.dumps(result, indent=2)
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def user_addone_model(self, data):
+        self.cur.execute(
+            f"insert into Users(name,email,phone, role,password) values('{data['name']}' , '{data['email']}'"
+            f",'{data['phone']}','{data['role']}','{data['password']}')")
+        self.conn.commit()
+        print(data)
+        # return "User Created successfully"               # String or HTML TEXT response
+        # return {"message":"User Created successfully"}     # JSON response
+        return make_response({"message": "User Created successfully"}, 201)  # HTTP Status code response
+
+    def user_update_model(self, data):
+        self.cur.execute(f"Update Users SET name='{data['name']}', email='{data['email']}', phone='{data['phone']}', "
+                         f"role='{data['role']}', password='{data['password']}' WHERE id={data['id']}")
+        if self.cur.rowcount > 0:
+            return make_response({"message": "User updated successfully"}, 201)
+        else:
+            return make_response({"message": "No data to update"}, 202)
+
+    def user_delete_model(self, id):
+        self.cur.execute(f"delete from Users  WHERE id={id}")
+        if self.cur.rowcount > 0:
+            return make_response({"message": "User deleted successfully"}, 200)
+        else:
+            return make_response({"message": "Nothing to delete"}, 202)
+
+    def user_patch_model(self, data, id):
+        qry = "UPDATE Users SET "
+        for key in data:
+            qry += f"{key}='{data[key]}' , "
+        qry = qry[:-1] + f"  WHERE  id = {id}"
+        self.cur.execute(qry)
+        if self.cur.rowcount > 0:
+            return make_response({"message": "User updated successfully"}, 201)
+        else:
+            return make_response({"message": "Nothing to update"}, 202)
+
+    def user_pagination_model(self, limit, page):
+        limit = int(limit)
+        page = int(page)
+        start = (page * limit) - limit
+        qry = """ SELECT * FROM Users ORDER BY id OFFSET ? ROWS FETCH NEXT ? ROWS ONLY; """
+        self.cur.execute(qry, (start, limit))
+        result = self.cur.fetchall()
+        if result:
+            # Convert to JSON-serializable format
+            payload = [
+                dict(zip([column[0] for column in self.cur.description], row))
+                for row in result
+            ]
+            return make_response({"payload": payload}, 200)
+        else:
+            return make_response({"message": "No Data found"}, 204)
+
+    # def user_upload_avatar_model(self, id, filepath):
+    #     self.cur.execute(f" Update Users SET avatar='{filepath}' WHERE id={id}")
+    #
+    #     if self.cur.rowcount > 0:
+    #         return make_response({"message": "User updated successfully"}, 201)
+    #     else:
+    #         return make_response({"message": "Nothing to update"}, 202)
+
+    def user_upload_avatar_model(self, id, filepath):
+        try:
+            qry = "UPDATE Users SET avatar = ? WHERE id = ?"
+            self.cur.execute(qry, (filepath, id))
+            self.conn.commit()
+            if self.cur.rowcount > 0:
+                return make_response({"message": "User updated successfully"}, 201)
+            else:
+                return make_response({"message": "No user found to update"}, 404)
+        except Exception as e:
+            return make_response({"error": str(e)}, 500)
+
+    def user_login_model(self, data):
+        email = data.get('email')
+        password = data.get('password')
+
+        # Use parameterized query to avoid SQL injection
+        self.cur.execute(
+            "SELECT id, name, email, phone, avatar, role_id FROM Users WHERE email = ? AND password = ?",
+            (email, password)
+        )
+
+        result = self.cur.fetchall()
+
+        if not result:
+            return make_response({"message": "Invalid email or password"}, 401)
+
+        # Convert result to dict
+        columns = [column[0] for column in self.cur.description]
+        userdata = dict(zip(columns, result[0]))
+
+        # Create JWT token
+        exp_time = datetime.now() + timedelta(minutes=15)
+        payload = {
+            "payload": userdata,
+            "exp": int(exp_time.timestamp())
+        }
+
+        token = jwt.encode(payload, "shivani", algorithm="HS256")
+
+        return make_response({"token": token}, 200)
