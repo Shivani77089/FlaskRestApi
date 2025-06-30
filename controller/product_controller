@@ -1,0 +1,6 @@
+from app import app
+
+
+@app.route("/product/signup")
+def prod():
+    return "This is product signup operation"
